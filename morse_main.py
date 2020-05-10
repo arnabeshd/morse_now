@@ -1,0 +1,33 @@
+fh = open('invictus.txt')
+for i in fh:
+    for j in i.upper():
+        for m in j:
+            if (m=='A'):m='.-'
+            elif (m=='B'):m='-...'
+            elif (m=='C'):m='-.-.'
+            elif (m=='D'):m='-..'
+            elif (m=='E'):m='.'
+            elif (m=='F'):m='..-.'
+            elif (m=='G'):m='--.'
+            elif (m=='H'):m='....'
+            elif (m=='I'):m='..'
+            elif (m=='J'):m='.---'
+            elif (m=='K'):m='-.-'
+            elif (m=='L'):m='.-..'
+            elif (m=='M'):m='--'
+            elif (m=='N'):m='-.'
+            elif (m=='O'):m='---'
+            elif (m=='P'):m='.--.'
+            elif (m=='Q'):m='--.-'
+            elif (m=='R'):m='.-.'
+            elif (m=='S'):m='...'
+            elif (m=='T'):m='-'
+            elif (m=='U'):m='..-'
+            elif (m=='V'):m='...-'
+            elif (m=='W'):m='.--'
+            elif (m=='X'):m='-..-'
+            elif (m=='Y'):m='-.--'
+            elif (m=='Z'):m='--..'
+            elif (m=='.'):m='.-.-.-'
+            elif (m==','):m='--..--'
+            print(m, end=' ')

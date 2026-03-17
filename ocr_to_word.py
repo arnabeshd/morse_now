@@ -22,17 +22,28 @@ class WordBox:
     y: int
     w: int
     h: int
-    r: int
-    g: int
-    b: int
+    red: int
+    green: int
+    blue: int
 
     @property
     def right(self) -> int:
         return self.x + self.w
 
     @property
-    def cy(self) -> float:
+    def center_y(self) -> float:
         return self.y + (self.h / 2)
+
+MIN_LINE_TOLERANCE_PX = 10  # Keep nearby words in same line for small fonts/noise.
+LINE_TOLERANCE_RATIO = 0.55  # Relative y-closeness threshold from median OCR box height.
+MIN_SPACE_UNITS = 1  # Always keep at least one separating space between adjacent words.
+MIN_CHAR_WIDTH_PX = 6  # Lower bound for estimated character width during gap normalization.
+SPACE_GAP_RATIO = 0.45  # Approximate average character width as a fraction of box height.
+MIN_FONT_PT = 8  # Smallest readable point size in generated DOCX.
+MAX_FONT_PT = 22  # Upper bound to avoid oversized OCR artifacts.
+HEIGHT_TO_POINT_RATIO = 0.65  # Convert OCR pixel height to approximate font point size.
+MIN_LINE_HEIGHT_PX = 14  # Guard rail for sparse OCR to keep paragraph spacing stable.
+PARAGRAPH_BREAK_MULTIPLIER = 1.8  # Insert blank line when vertical gap is significantly larger.
 
 
 def _is_url(path_or_url: str) -> bool:
@@ -78,31 +89,32 @@ def _extract_word_boxes(img: Image.Image) -> list[WordBox]:
         y = int(data["top"][i])
         w = int(data["width"][i])
         h = int(data["height"][i])
-        r, g, b = _sample_color(img, x, y, w, h)
-        words.append(WordBox(text=text, x=x, y=y, w=w, h=h, r=r, g=g, b=b))
+        red, green, blue = _sample_color(img, x, y, w, h)
+        words.append(WordBox(text=text, x=x, y=y, w=w, h=h, red=red, green=green, blue=blue))
     return words
 
 
 def _group_lines(words: list[WordBox]) -> list[list[WordBox]]:
+    """Cluster OCR words into text lines using center-y proximity and sort each line by x."""
     if not words:
         return []
-    words = sorted(words, key=lambda w: (w.cy, w.x))
-    heights = sorted(word.h for word in words)
+    sorted_words = sorted(words, key=lambda w: (w.center_y, w.x))
+    heights = sorted(word.h for word in sorted_words)
     median_h = heights[len(heights) // 2]
-    y_tolerance = max(10, int(median_h * 0.55))
+    y_tolerance = max(MIN_LINE_TOLERANCE_PX, int(median_h * LINE_TOLERANCE_RATIO))
     lines: list[list[WordBox]] = []
     line_centers: list[float] = []
-    for word in words:
+    for word in sorted_words:
         placed = False
         for index, center in enumerate(line_centers):
-            if abs(word.cy - center) <= y_tolerance:
+            if abs(word.center_y - center) <= y_tolerance:
                 lines[index].append(word)
-                line_centers[index] = sum(w.cy for w in lines[index]) / len(lines[index])
+                line_centers[index] = sum(w.center_y for w in lines[index]) / len(lines[index])
                 placed = True
                 break
         if not placed:
             lines.append([word])
-            line_centers.append(word.cy)
+            line_centers.append(word.center_y)
     for line in lines:
         line.sort(key=lambda w: w.x)
     lines.sort(key=lambda line: min(word.y for word in line))
@@ -110,6 +122,7 @@ def _group_lines(words: list[WordBox]) -> list[list[WordBox]]:
 
 
 def convert_image_to_word(source: str, output_docx: str) -> str:
+    """Convert an image (URL or local path) to editable DOCX and return resolved output path."""
     image = _open_image(source)
     words = _extract_word_boxes(image)
     lines = _group_lines(words)
@@ -118,11 +131,13 @@ def convert_image_to_word(source: str, output_docx: str) -> str:
     section = document.sections[0]
     usable_width = section.page_width - section.left_margin - section.right_margin
     previous_line_y: float | None = None
-    median_line_height = max(14, int(sum(word.h for word in words) / max(1, len(words))))
+    median_line_height = max(MIN_LINE_HEIGHT_PX, int(sum(word.h for word in words) / max(1, len(words))))
 
     for line in lines:
         top = min(word.y for word in line)
-        if previous_line_y is not None and top - previous_line_y > int(median_line_height * 1.8):
+        if previous_line_y is not None and top - previous_line_y > int(
+            median_line_height * PARAGRAPH_BREAK_MULTIPLIER
+        ):
             document.add_paragraph("")
         previous_line_y = top
 
@@ -134,11 +149,16 @@ def convert_image_to_word(source: str, output_docx: str) -> str:
         for word in line:
             if previous_word is not None:
                 gap = max(0, word.x - previous_word.right)
-                normalized_gap = max(1, int(round(gap / max(6, previous_word.h * 0.45))))
+                normalized_gap = max(
+                    MIN_SPACE_UNITS,
+                    int(round(gap / max(MIN_CHAR_WIDTH_PX, previous_word.h * SPACE_GAP_RATIO))),
+                )
                 paragraph.add_run(" " * normalized_gap)
             run = paragraph.add_run(word.text)
-            run.font.color.rgb = RGBColor(word.r, word.g, word.b)
-            run.font.size = Pt(max(8, min(22, int(round(word.h * 0.65)))))
+            run.font.color.rgb = RGBColor(word.red, word.green, word.blue)
+            run.font.size = Pt(
+                max(MIN_FONT_PT, min(MAX_FONT_PT, int(round(word.h * HEIGHT_TO_POINT_RATIO))))
+            )
             previous_word = word
 
     output_path = Path(output_docx)
